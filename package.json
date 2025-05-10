@@ -4,10 +4,16 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
+    "build": "nx affected:build",
+    "auth:build": "nx build auth-service",
+    "room:build": "nx build room-service",
+    "chat:build": "nx build chat-service",
     "auth:dev": "cd packages/auth-service && npm run dev",
-    "build": "npm run build --workspaces"
+    "room:dev": "cd packages/room-service && npm run dev",
+    "chat:dev": "cd packages/chat-service && npm run dev"
   },
   "devDependencies": {
+    "nx": "^16.0.0",
     "typescript": "^5.3.3"
   }
 }

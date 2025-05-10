@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+.git
+.gitignore
+*.md
+*.yaml
+*.yml
+Dockerfile
+package-lock.json

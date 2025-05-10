@@ -1,0 +1,101 @@
+name: ConferX
+services:
+  apisix:
+    extends:
+      file: ./apisix/docker-compose.yml
+      service: apisix
+  etcd:
+    extends:
+      file: ./apisix/docker-compose.yml
+      service: etcd
+  apisix-dashboard:
+    extends:
+      file: ./apisix/docker-compose.yml
+      service: apisix-dashboard
+  prometheus:
+    extends:
+      file: ./apisix/docker-compose.yml
+      service: prometheus
+  grafana:
+    extends:
+      file: ./apisix/docker-compose.yml
+      service: grafana
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  postgres:
+    image: postgres:14
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: conferx_auth
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  auth-service:
+    build:
+      context: ../packages/auth-service
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - kafka
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_NAME: conferx_auth
+      KAFKA_BROKER: kafka:9092
+    command : npm run start-dev
+  # room-service:
+  #   build:
+  #     context: ../packages/room-service
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3001:3001"
+  #   depends_on:
+  #     - postgres
+  #     - kafka
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: 5432
+  #     DB_USER: postgres
+  #     DB_PASSWORD: password
+  #     DB_NAME: conferx_room
+  #     KAFKA_BROKER: kafka:9092
+  # chat-service:
+    # build:
+    #   context: ../packages/chat-service
+    #   dockerfile: Dockerfile
+    # ports:
+    #   - "3003:3003"
+    # depends_on:
+    #   - kafka
+    # environment:
+    #   KAFKA_BROKER: kafka:9092
+networks:
+  apisix_network:
+    external: true
+volumes:
+  postgres_data:
+  etcd_data:
+    driver: local
