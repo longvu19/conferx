@@ -1,0 +1,25 @@
+{
+  "name": "room-service",
+  "module": "src/index.ts",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start-dev": "bun src/index.ts",
+    "migrate-db": "bun drizzle-kit push",
+    "start": "bun run migrate-db && bun run src/index.ts",
+    "build": "bun run migrate-db && bun run build --outdir ./build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.43.1",
+    "hono": "^4.7.9",
+    "postgres": "^3.4.5"
+  }
+}

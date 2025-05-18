@@ -38,14 +38,15 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-  postgres:
+  rooms-db:
     image: postgres:14
+    restart: always
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: conferx_auth
+      # POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: wmJ9Q96@R3
+      POSTGRES_DB: conferx_rooms
     volumes:
       - postgres_data:/var/lib/postgresql/data
   auth-service:
@@ -56,32 +57,24 @@ services:
     ports:
       - "3001:3001"
     depends_on:
-      - postgres
       - kafka
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: password
-      DB_NAME: conferx_auth
       KAFKA_BROKER: kafka:9092
     command : npm run start-dev
-  # room-service:
-  #   build:
-  #     context: ../packages/room-service
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "3001:3001"
-  #   depends_on:
-  #     - postgres
-  #     - kafka
-  #   environment:
-  #     DB_HOST: postgres
-  #     DB_PORT: 5432
-  #     DB_USER: postgres
-  #     DB_PASSWORD: password
-  #     DB_NAME: conferx_room
-  #     KAFKA_BROKER: kafka:9092
+  room-service:
+    build:
+      context: ../packages/room-service
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    depends_on:
+      - rooms-db
+      - kafka
+    environment:
+      PORT: 3002
+      DB_URL: postgresql://postgres:wmJ9Q96@R3@rooms-db:5432/conferx_rooms
+      JWT_SECRET: a9afdaebc6cc54a123677d1ef113ed730070464bb817af97f3d36e10f6bab27d2a9105039fb317ad51d02c28372cc4b3d34c4f03f3d1378c270f0dffd34fff619e143751cfecbb072d822797412c1e61aefe146e185ae1b15acb2d140cfbb440fb413b52ce13f0ec447dd2fdeb61f390b86c68dd821adafcf330076ec12cdb2d82541bbbedddd0e5452a6091ab16b466c57f36bcaf02f915638fd6a2aafef3b982f2801a1015dc9e0ad821cd49a03e2947b7b47dbe64ce36074e67f26bef077eaf78728c5e2629c6c7eebd9278b53d2c29121cd9d07e1cdeda74407d818fee449891bb7a31667515e4ea66c5436b3f23f0ec36c46e2758f03dfa03b07d7413bc
+      KAFKA_BROKER: kafka:9092
   # chat-service:
     # build:
     #   context: ../packages/chat-service
