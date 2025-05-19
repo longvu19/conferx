@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { relations } from 'drizzle-orm';
 const db = drizzle({ connection: process.env.DB_URL!, casing: 'snake_case' });
 export const roomsStatusEnum = pgEnum('rooms_status', ['open','private', 'closed']);
+export const participantsStatusEnum = pgEnum('participants_status', ['pending','approved', 'rejected']);
 const timestamps = {
   updated_at: timestamp(),
   created_at: timestamp().defaultNow().notNull(),
@@ -23,8 +24,10 @@ export const rooms = pgTable('rooms', {
 
 export const participants = pgTable('participants', {
   id: serial('id').primaryKey(),
-  room_id: varchar({ length: 255 }).notNull().references(() => rooms.room_id),
+  user_id: varchar({ length: 255 }).notNull(),
+  room_id: varchar({ length: 255 }).notNull().references(() => rooms.room_id, {onDelete: 'cascade'}),
   name: varchar({ length: 255 }).notNull(),
+  status: participantsStatusEnum().notNull().default('pending'),
   ...timestamps,
 });
 
