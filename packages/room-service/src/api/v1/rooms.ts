@@ -2,14 +2,26 @@ import { Hono } from "hono";
 import { eq, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { participants, rooms, RoomsStatusEnumValues } from "../../db/schema.ts";
-import type { NewRoom, RoomsStatusEnumType } from "../../db/schema.ts";
-const roomsAPI = new Hono();
+import type { Room, Participant, NewRoom, RoomsStatusEnumType } from "../../db/schema.ts";
+import { jwt, sign, verify } from 'hono/jwt';
+import type { JwtVariables } from 'hono/jwt'
+type Variables = JwtVariables;
+const secretToken = process.env.JWT_SECRET
+const roomsAPI = new Hono<{ Variables: Variables }>();
 const db = drizzle({ connection: process.env.DB_URL!, casing: "snake_case" });
 
 roomsAPI.get("/", async (c) => {
-  const roomsData = await db.select().from(rooms).leftJoin(participants,eq(rooms.room_id, participants.room_id));
+  const roomsData = await db.select().from(rooms).leftJoin(participants, eq(rooms.room_id, participants.room_id));
+  const result = roomsData.reduce<Record<string, { room: Room; participants: Participant[]; }>>((acc, row) => {
+    const roomId = row.rooms.room_id;
+    if (!acc[roomId]) {
+      acc[roomId] = { room: row.rooms, participants: [] };
+    }
+    acc[roomId].participants.push(row.participants!);
+    return acc;
+  }, {});
   c.status(200);
-  return c.json(roomsData);
+  return c.json(result);
 });
 
 roomsAPI.get("/:roomId", async (c) => {
@@ -52,10 +64,15 @@ roomsAPI.post("/", async (c) => {
       tx.rollback();
       throw new Error("Failed to insert participant");
     }
-    return insertedRoom
   });
+  const payload = {
+    room_id: roomData.room_id,
+    user_id: userInput.user_id as string,
+    iat: Math.floor(Date.now() / 1000),
+  }
+  const token = await sign(payload, secretToken as string);
   c.status(201);
-  return c.json(result);
+  return c.json({token: token});
 });
 
 roomsAPI.put("/:roomId", async (c) => {
@@ -113,19 +130,23 @@ roomsAPI.post("/join/:roomId", async (c) => {
   return c.json(result);
 });
 
-roomsAPI.delete("/leave/:roomId", async (c) => {
+roomsAPI.delete("/leave/:roomId/:userId", async (c) => {
   const roomId = c.req.param("roomId");
-  const userInput = await c.req.parseBody();
+  const userId = c.req.param("userId");
   const result = await db.delete(participants).where(
     and(eq(participants.room_id, roomId),
-    eq(participants.user_id, userInput.user_id as string))
+    eq(participants.user_id, userId))
   );
   c.status(204);
   return c.json({ status: "success", data: result });
 });
 
-roomsAPI.put("/end/:roomId", async (c) => {
+roomsAPI.put("/end/:roomId",jwt({
+    secret: secretToken as string
+  }), async (c) => {
   const roomId = c.req.param("roomId");
+  const payload = c.get('jwtPayload');
+  return c.json(payload);
   const result = await db.transaction(async (tx) => {
     const updatedRoom = await tx
       .update(rooms)
@@ -136,7 +157,7 @@ roomsAPI.put("/end/:roomId", async (c) => {
       .where(eq(rooms.room_id, roomId)).returning();
     if (updatedRoom.length === 0) {
       c.status(404);
-      return c.json({ error: "Room not found" });
+      return c.json({ error: "Meeting not found" });
     }
     const deletedParticipants = await tx
       .delete(participants)
@@ -146,5 +167,4 @@ roomsAPI.put("/end/:roomId", async (c) => {
   c.status(200);
   return c.json(result);
 });
-
 export default roomsAPI;

@@ -12,7 +12,7 @@ const apiDir = join(import.meta.dir, "api");
 const versions = readdirSync(apiDir);
 for (const version of versions) {
   const versionPath = join(apiDir, version);
-  const resources = readdirSync(versionPath);
+  const resources = readdirSync(versionPath, { withFileTypes: true }).filter((f) => f.isFile() && f.name.endsWith(".ts")).map((f) => f.name);
   for (const resource of resources) {
     const resourcePath = join(versionPath, resource);
     const resourceName = resource.replace(".ts", "");
