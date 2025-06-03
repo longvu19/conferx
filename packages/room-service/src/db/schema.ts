@@ -15,6 +15,7 @@ export const rooms = pgTable('rooms', {
   id: serial('id').primaryKey(),
   // name: varchar({ length: 255 }).notNull(),
   room_id: varchar({ length: 255 }).notNull().unique(),
+  admin_id: varchar({ length: 255 }).notNull(),
   admin_password: varchar({ length: 255 }).notNull(),
   room_password: varchar({ length: 255 }).notNull(),
   // ownerId: integer().notNull(),
