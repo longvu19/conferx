@@ -6,7 +6,7 @@
     "start-dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "build": "rimraf ./dist && tsc",
-    "dev": "tsc"
+    "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

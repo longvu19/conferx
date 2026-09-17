@@ -1,5 +1,5 @@
 {
-  "id": "3916ecfb-5489-4c43-98e1-0946a7674b73",
+  "id": "a3210065-0e93-4744-ac11-61ea1d553b24",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -14,17 +14,39 @@
           "primaryKey": true,
           "notNull": true
         },
-        "roomId": {
-          "name": "roomId",
-          "type": "integer",
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true
         },
         "name": {
           "name": "name",
-          "type": "varchar(255)",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "participants_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
+        "status": {
+          "name": "status",
+          "type": "participants_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
         },
         "updated_at": {
           "name": "updated_at",
@@ -40,19 +62,41 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "participants_room_user_idx": {
+          "name": "participants_room_user_idx",
+          "columns": [
+            {
+              "expression": "room_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
-        "participants_roomId_rooms_id_fk": {
-          "name": "participants_roomId_rooms_id_fk",
+        "participants_room_id_rooms_room_id_fk": {
+          "name": "participants_room_id_rooms_room_id_fk",
           "tableFrom": "participants",
           "tableTo": "rooms",
           "columnsFrom": [
-            "roomId"
+            "room_id"
           ],
           "columnsTo": [
-            "id"
+            "room_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -72,21 +116,27 @@
           "primaryKey": true,
           "notNull": true
         },
-        "name": {
-          "name": "name",
+        "room_id": {
+          "name": "room_id",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_id": {
+          "name": "admin_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "admin_password": {
+          "name": "admin_password",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
-        "adminPassword": {
-          "name": "adminPassword",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "roomPassword": {
-          "name": "roomPassword",
-          "type": "varchar(255)",
+        "room_password": {
+          "name": "room_password",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true
         },
@@ -95,7 +145,8 @@
           "type": "rooms_status",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'private'"
         },
         "updated_at": {
           "name": "updated_at",
@@ -114,18 +165,44 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "rooms_room_id_unique": {
+          "name": "rooms_room_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "room_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
   "enums": {
+    "public.participants_role": {
+      "name": "participants_role",
+      "schema": "public",
+      "values": [
+        "admin",
+        "member"
+      ]
+    },
+    "public.participants_status": {
+      "name": "participants_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "approved",
+        "rejected"
+      ]
+    },
     "public.rooms_status": {
       "name": "rooms_status",
       "schema": "public",
       "values": [
         "open",
+        "private",
         "closed"
       ]
     }

@@ -1,4 +1,6 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import 'dotenv/config';
+import { drizzle } from "drizzle-orm/postgres-js";
+import { env } from "../lib/env.ts";
+import * as schema from "./schema.ts";
 
-const db = drizzle({connection:process.env.DB_URL!,casing: 'snake_case'});
+export const db = drizzle({ connection: env.dbUrl, casing: "snake_case", schema });
+export type DB = typeof db;
