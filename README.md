@@ -6,7 +6,8 @@ Platforms: Web (Nuxt/Vue, repo `conferx-fe`), Desktop (Electron, planned).
 ## Architecture
 
 ```
-Browser ──HTTP──▶ APISIX :9080 ──▶ room-service :3002 ──▶ Postgres
+Browser ──HTTP──▶ APISIX :9080 ──▶ auth-service :3001 ──▶ Postgres (auth)
+                          └──────▶ room-service :3002 ──▶ Postgres (rooms)
    │                                    │
    └──WebRTC (ws :7880, udp :7882)──▶ LiveKit SFU ◀── server API (tokens, kick, end)
 ```
@@ -16,7 +17,7 @@ Browser ──HTTP──▶ APISIX :9080 ──▶ room-service :3002 ──▶ 
 | Gateway | APISIX 3 + etcd, routes in `config/apisix/init/routes.sh` | ✅ |
 | room-service | Bun, Hono, Drizzle, Postgres | ✅ meetings, waiting room, admin controls, media tokens |
 | Media | LiveKit SFU (video, audio, screen share, in-meeting chat via data channel) | ✅ |
-| auth-service | Express | 🚧 skeleton (meetings use anonymous browser IDs) |
+| auth-service | Bun, Hono, Drizzle, Postgres | ✅ accounts, rotating refresh tokens (guests can still join without an account) |
 | Monitoring | Prometheus + Grafana (`--profile monitoring`) | ✅ optional |
 
 ## Run locally

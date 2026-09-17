@@ -23,6 +23,8 @@ export const env = {
   dbUrl: buildDbUrl(),
   jwtSecret: required("JWT_SECRET"),
   jwtRefreshSecret: required("JWT_REFRESH_SECRET"),
+  // Shared with auth-service to verify signed-in users.
+  userJwtSecret: required("USER_JWT_SECRET"),
   accessTokenTtl: Number(process.env.ACCESS_TOKEN_TTL ?? 15 * 60),
   refreshTokenTtl: Number(process.env.REFRESH_TOKEN_TTL ?? 7 * 24 * 60 * 60),
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",

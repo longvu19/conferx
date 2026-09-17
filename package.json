@@ -9,8 +9,8 @@
     "stack:logs": "docker compose -f config/docker-compose.yml logs -f",
     "room:dev": "cd packages/room-service && bun run dev",
     "room:typecheck": "cd packages/room-service && bun run typecheck",
-    "auth:dev": "cd packages/auth-service && npm run dev",
-    "auth:build": "nx build auth-service"
+    "auth:dev": "cd packages/auth-service && bun run dev",
+    "auth:typecheck": "cd packages/auth-service && bun run typecheck"
   },
   "devDependencies": {
     "nx": "^16.0.0",
