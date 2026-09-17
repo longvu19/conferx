@@ -1,14 +1,12 @@
-FROM node:22 AS development
+FROM oven/bun:1 AS base
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
+
+# Install dependencies first to leverage layer caching.
+COPY package.json ./
+RUN bun install
+
 COPY . .
-RUN npm run build
-FROM node:22 AS production
-WORKDIR /app
-ARG NODE_ENV=production
-ENV NODE_ENV=${NODE_ENV}
-COPY package*.json ./
-RUN npm ci --only=production
-COPY --from=development /app/dist ./dist
-CMD ["node", "dist/index.js"]
+
+USER bun
+EXPOSE 3001
+CMD ["bun", "run", "start"]

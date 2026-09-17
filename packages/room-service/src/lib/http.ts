@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { getCookie } from "hono/cookie";
 import type { z } from "zod";
-import { verifyAccessToken, type TokenClaims } from "./jwt.ts";
+import { verifyAccessToken, verifyUserToken, type TokenClaims, type UserClaims } from "./jwt.ts";
 
 export type AppEnv = { Variables: { auth: TokenClaims } };
 
@@ -41,3 +41,19 @@ export const requireRoomAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 
 export const refreshCookieName = (roomId: string) => `rt_${roomId.replaceAll("-", "_")}`;
 export const getRefreshCookie = (c: Context, roomId: string) => getCookie(c, refreshCookieName(roomId));
+
+/**
+ * Optional signed-in user on create/join/list requests.
+ * No Authorization header -> guest (null). An invalid or expired token is a 401 so the
+ * client refreshes instead of silently continuing as a guest.
+ */
+export const getOptionalUser = async (c: Context): Promise<UserClaims | null> => {
+  const header = c.req.header("authorization");
+  if (!header) return null;
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  try {
+    return await verifyUserToken(token);
+  } catch {
+    throw new HTTPException(401, { message: "Your sign-in expired. Sign in again." });
+  }
+};

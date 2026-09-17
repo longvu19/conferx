@@ -11,13 +11,20 @@ bun run dev
 
 Schema changes: edit `src/db/schema.ts`, then `bun run db:generate` and commit the new migration.
 
+## Identity
+
+Guests send `user_id` (a browser id) and `name`. Signed-in users send `Authorization: Bearer <auth-service token>` on
+create/join/list instead. The server stores `g_<browser id>` or `u_<account id>` and returns it as `user_id`, so a guest
+can never impersonate an account.
+
 ## API (`/api/v1/rooms`)
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/` | – | Create meeting → `room_id`, `room_password`, admin `token` |
+| GET | `/` | user | Meetings created by the signed-in account |
+| POST | `/` | – / user | Create meeting → `room_id`, `user_id`, `room_password`, admin `token` |
 | GET | `/:roomId` | – | Public info (status, participant count) |
-| POST | `/:roomId/join` | – | Join with room password (member) or admin password (admin) |
+| POST | `/:roomId/join` | – / user | Join with room password (member) or admin password (admin); the owner account needs no password |
 | POST | `/:roomId/refresh-token` | cookie | New access token |
 | GET | `/:roomId/me` | Bearer | Own status (admin also gets `room_password`) |
 | GET | `/:roomId/participants` | Bearer | List (admin sees waiting list) |

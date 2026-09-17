@@ -2,7 +2,7 @@
 #   cp config/.env.example config/.env   # then edit secrets
 #   docker compose -f config/docker-compose.yml up -d --build
 # Optional profiles: --profile monitoring (Prometheus + Grafana), --profile dashboard (APISIX dashboard),
-#                    --profile auth (auth-service, WIP), --profile kafka (Kafka + Zookeeper, not used yet)
+#                    --profile kafka (Kafka + Zookeeper, not used yet)
 name: conferx
 
 x-restart: &restart
@@ -69,6 +69,39 @@ services:
       timeout: 5s
       retries: 10
 
+  auth-db:
+    <<: *restart
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in config/.env}
+      POSTGRES_DB: conferx_auth
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d conferx_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth-service:
+    <<: *restart
+    build:
+      context: ../packages/auth-service
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DB_HOST: auth-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      DB_NAME: conferx_auth
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?set USER_JWT_SECRET in config/.env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    # Not published: reach it through the gateway at http://localhost:9080/api/v1/auth
+
   room-service:
     <<: *restart
     build:
@@ -85,6 +118,7 @@ services:
       DB_NAME: conferx_rooms
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in config/.env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in config/.env}
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?set USER_JWT_SECRET in config/.env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in config/.env}
@@ -108,15 +142,6 @@ services:
       - "7882:7882/udp"   # WebRTC over UDP
 
   # ---------------- Optional ----------------
-  auth-service:
-    profiles: ["auth"]
-    build:
-      context: ../packages/auth-service
-      target: development
-    ports:
-      - "127.0.0.1:3001:3001"
-    command: npm run start-dev
-
   zookeeper:
     profiles: ["kafka"]
     image: confluentinc/cp-zookeeper:7.3.0
@@ -167,3 +192,4 @@ services:
 volumes:
   etcd_data:
   rooms_db_data:
+  auth_db_data:

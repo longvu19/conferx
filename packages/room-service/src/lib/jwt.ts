@@ -28,3 +28,15 @@ export const verifyAccessToken = async (token: string) =>
 
 export const verifyRefreshToken = async (token: string) =>
   toClaims(await verify(token, env.jwtRefreshSecret, "HS256"), "refresh");
+
+export interface UserClaims {
+  sub: string;
+  name: string;
+}
+
+/** Access token issued by auth-service for a signed-in account. */
+export const verifyUserToken = async (token: string): Promise<UserClaims> => {
+  const payload = await verify(token, env.userJwtSecret, "HS256");
+  if (payload.typ !== "user" || typeof payload.sub !== "string") throw new Error("Invalid user token");
+  return { sub: payload.sub, name: String(payload.name ?? "") };
+};

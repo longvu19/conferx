@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { setCookie } from "hono/cookie";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { db } from "../../db/index.ts";
@@ -10,21 +10,22 @@ import { env } from "../../lib/env.ts";
 import { generateRoomId, generateRoomPassword } from "../../lib/ids.ts";
 import { signAccessToken, signRefreshToken, verifyRefreshToken, type TokenClaims } from "../../lib/jwt.ts";
 import { closeMediaRoom, createMediaToken, removeFromMediaRoom } from "../../lib/livekit.ts";
-import { getRefreshCookie, readBody, refreshCookieName, requireRoomAuth, type AppEnv } from "../../lib/http.ts";
+import { getOptionalUser, getRefreshCookie, readBody, refreshCookieName, requireRoomAuth, type AppEnv } from "../../lib/http.ts";
 
 const roomsAPI = new Hono<AppEnv>();
 
 // ---------- schemas ----------
-const userId = z.string().trim().min(8).max(64);
-const displayName = z.string().trim().min(1).max(64);
+// Guest browser id; the server prefixes it so guests can never claim an account's id.
+const guestId = z.string().trim().min(8).max(60).optional();
+const displayName = z.string().trim().min(1).max(64).optional();
 
 const createRoomSchema = z.object({
-  user_id: userId,
+  user_id: guestId,
   name: displayName,
   admin_password: z.string().min(8).max(128),
   status: z.enum(["open", "private"]).default("private"),
 });
-const joinRoomSchema = z.object({ user_id: userId, name: displayName, password: z.string().min(1).max(128) });
+const joinRoomSchema = z.object({ user_id: guestId, name: displayName, password: z.string().min(1).max(128).optional() });
 const updateRoomSchema = z.object({ status: z.enum(["open", "private"]) });
 const updateParticipantSchema = z.object({ status: z.enum(["approved", "rejected"]) });
 
@@ -61,6 +62,18 @@ const requireAdmin = async (auth: TokenClaims) => {
   return me;
 };
 
+/**
+ * Who is calling: a signed-in account ("u_<id>", from the user token) or a guest
+ * ("g_<browser id>"). Prefixes keep the two id spaces apart.
+ */
+const resolveIdentity = async (c: Context, input: { user_id?: string; name?: string }) => {
+  const user = await getOptionalUser(c);
+  if (user) return { id: `u_${user.sub}`, name: input.name ?? user.name, isAccount: true };
+  if (!input.user_id) throw new HTTPException(400, { message: "user_id is required for guests" });
+  if (!input.name) throw new HTTPException(400, { message: "name is required" });
+  return { id: `g_${input.user_id}`, name: input.name, isAccount: false };
+};
+
 const safeEqual = (a: string, b: string) => {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -90,6 +103,19 @@ const issueSession = async (c: Context, claims: TokenClaims) => {
 
 // ---------- public endpoints ----------
 
+/** Meetings created by the signed-in account (newest first). */
+roomsAPI.get("/", async (c) => {
+  const user = await getOptionalUser(c);
+  if (!user) throw new HTTPException(401, { message: "Sign in to see your meetings" });
+  const mine = await db
+    .select({ room_id: rooms.room_id, status: rooms.status, room_password: rooms.room_password, created_at: rooms.created_at })
+    .from(rooms)
+    .where(eq(rooms.admin_id, `u_${user.sub}`))
+    .orderBy(desc(rooms.created_at))
+    .limit(50);
+  return c.json(mine);
+});
+
 /** Public room info used by the join screen. Never exposes passwords. */
 roomsAPI.get("/:roomId", async (c) => {
   const room = await findRoom(c.req.param("roomId"));
@@ -108,6 +134,7 @@ roomsAPI.get("/:roomId", async (c) => {
 /** Create a meeting. The creator becomes admin and receives the room password to share. */
 roomsAPI.post("/", async (c) => {
   const input = await readBody(c, createRoomSchema);
+  const who = await resolveIdentity(c, input);
   const adminPasswordHash = await Bun.password.hash(input.admin_password, { algorithm: "bcrypt", cost: 10 });
 
   // Retry on the (unlikely) event of a room_id collision.
@@ -119,7 +146,7 @@ roomsAPI.post("/", async (c) => {
           .insert(rooms)
           .values({
             room_id: generateRoomId(),
-            admin_id: input.user_id,
+            admin_id: who.id,
             admin_password: adminPasswordHash,
             room_password: generateRoomPassword(),
             status: input.status,
@@ -128,8 +155,8 @@ roomsAPI.post("/", async (c) => {
         if (!created) throw new Error("Failed to create room");
         await tx.insert(participants).values({
           room_id: created.room_id,
-          user_id: input.user_id,
-          name: input.name,
+          user_id: who.id,
+          name: who.name,
           role: "admin",
           status: "approved",
         });
@@ -141,28 +168,31 @@ roomsAPI.post("/", async (c) => {
   }
   if (!room) throw new HTTPException(500, { message: "Failed to create room" });
 
-  const token = await issueSession(c, { room_id: room.room_id, user_id: input.user_id, role: "admin" });
+  const token = await issueSession(c, { room_id: room.room_id, user_id: who.id, role: "admin" });
   return c.json(
-    { room_id: room.room_id, room_password: room.room_password, status: room.status, role: "admin", participant_status: "approved", token },
+    { room_id: room.room_id, user_id: who.id, room_password: room.room_password, status: room.status, role: "admin", participant_status: "approved", token },
     201,
   );
 });
 
 /**
  * Join with the room password (member) or the admin password (admin).
+ * The signed-in account that created the room rejoins as admin without a password.
  * Open rooms approve members immediately; private rooms put them in the waiting list.
  * Calling join again (e.g. after a page reload) re-issues the session.
  */
 roomsAPI.post("/:roomId/join", async (c) => {
   const room = await findActiveRoom(c.req.param("roomId"));
   const input = await readBody(c, joinRoomSchema);
+  const who = await resolveIdentity(c, input);
 
-  const isAdmin = await Bun.password.verify(input.password, room.admin_password);
-  if (!isAdmin && !safeEqual(input.password, room.room_password)) {
-    throw new HTTPException(401, { message: "Wrong meeting password" });
+  const isOwner = who.isAccount && room.admin_id === who.id;
+  const isAdmin = isOwner || (!!input.password && (await Bun.password.verify(input.password, room.admin_password)));
+  if (!isAdmin && !(input.password && safeEqual(input.password, room.room_password))) {
+    throw new HTTPException(401, { message: input.password ? "Wrong meeting password" : "Enter the meeting password" });
   }
 
-  const existing = await findParticipant(room.room_id, input.user_id);
+  const existing = await findParticipant(room.room_id, who.id);
   if (existing?.status === "rejected" && !isAdmin) {
     throw new HTTPException(403, { message: "The admin removed you from this meeting" });
   }
@@ -173,14 +203,14 @@ roomsAPI.post("/:roomId/join", async (c) => {
 
   await db
     .insert(participants)
-    .values({ room_id: room.room_id, user_id: input.user_id, name: input.name, role, status })
+    .values({ room_id: room.room_id, user_id: who.id, name: who.name, role, status })
     .onConflictDoUpdate({
       target: [participants.room_id, participants.user_id],
-      set: { name: input.name, role, status, updated_at: new Date() },
+      set: { name: who.name, role, status, updated_at: new Date() },
     });
 
-  const token = await issueSession(c, { room_id: room.room_id, user_id: input.user_id, role });
-  return c.json({ room_id: room.room_id, role, participant_status: status, token }, existing ? 200 : 201);
+  const token = await issueSession(c, { room_id: room.room_id, user_id: who.id, role });
+  return c.json({ room_id: room.room_id, user_id: who.id, role, participant_status: status, token }, existing ? 200 : 201);
 });
 
 /** Exchange the HttpOnly refresh cookie for a new access token. */

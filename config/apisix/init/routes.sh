@@ -42,6 +42,34 @@ put routes/rooms '{
   }
 }'
 
+put upstreams/auth-service '{
+  "name": "auth-service",
+  "type": "roundrobin",
+  "nodes": { "auth-service:3001": 1 },
+  "checks": { "active": { "http_path": "/health", "healthy": { "interval": 10 }, "unhealthy": { "interval": 5 } } }
+}'
+
+# Brute-force protection for sign-in and sign-up: 10 attempts / minute per IP.
+put routes/auth-credentials '{
+  "name": "auth-credentials",
+  "uris": ["/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/me/password"],
+  "methods": ["POST"],
+  "priority": 10,
+  "upstream_id": "auth-service",
+  "plugins": {
+    "limit-count": { "count": 10, "time_window": 60, "key_type": "var", "key": "remote_addr", "rejected_code": 429 }
+  }
+}'
+
+put routes/auth '{
+  "name": "auth",
+  "uris": ["/api/v1/auth", "/api/v1/auth/*"],
+  "upstream_id": "auth-service",
+  "plugins": {
+    "limit-count": { "count": 300, "time_window": 60, "key_type": "var", "key": "remote_addr", "rejected_code": 429 }
+  }
+}'
+
 put global_rules/1 '{ "plugins": { "request-id": {}, "prometheus": {} } }'
 
 echo "APISIX routes configured."
