@@ -1,94 +1,169 @@
-name: ConferX
+# ConferX local stack.
+#   cp config/.env.example config/.env   # then edit secrets
+#   docker compose -f config/docker-compose.yml up -d --build
+# Optional profiles: --profile monitoring (Prometheus + Grafana), --profile dashboard (APISIX dashboard),
+#                    --profile auth (auth-service, WIP), --profile kafka (Kafka + Zookeeper, not used yet)
+name: conferx
+
+x-restart: &restart
+  restart: unless-stopped
+
 services:
-  apisix:
-    extends:
-      file: ./apisix/docker-compose.yml
-      service: apisix
+  # ---------------- Gateway ----------------
   etcd:
-    extends:
-      file: ./apisix/docker-compose.yml
-      service: etcd
-  apisix-dashboard:
-    extends:
-      file: ./apisix/docker-compose.yml
-      service: apisix-dashboard
-  prometheus:
-    extends:
-      file: ./apisix/docker-compose.yml
-      service: prometheus
-  grafana:
-    extends:
-      file: ./apisix/docker-compose.yml
-      service: grafana
-  kafka:
-    image: confluentinc/cp-kafka:7.3.0
+    <<: *restart
+    image: quay.io/coreos/etcd:v3.5.17   # multi-arch (amd64 + arm64)
+    command: ["/usr/local/bin/etcd"]
+    environment:
+      ETCD_NAME: etcd
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+    volumes:
+      - etcd_data:/etcd-data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  apisix:
+    <<: *restart
+    image: apache/apisix:${APISIX_IMAGE_TAG:-3.12.0-debian}
+    environment:
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY in config/.env}
+    volumes:
+      - ./apisix/apisix_conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    depends_on:
+      etcd:
+        condition: service_healthy
     ports:
-      - "9092:9092"
+      - "9080:9080"             # public gateway
+      - "127.0.0.1:9180:9180"   # admin API (localhost only)
+
+  apisix-init:
+    image: curlimages/curl:8.10.1
+    restart: "no"
+    environment:
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY in config/.env}
+    volumes:
+      - ./apisix/init/routes.sh:/routes.sh:ro
+    entrypoint: ["sh", "/routes.sh"]
+    depends_on:
+      - apisix
+
+  # ---------------- Services ----------------
+  rooms-db:
+    <<: *restart
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${ROOMS_DB_PASSWORD:?set ROOMS_DB_PASSWORD in config/.env}
+      POSTGRES_DB: conferx_rooms
+    volumes:
+      - rooms_db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d conferx_rooms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  room-service:
+    <<: *restart
+    build:
+      context: ../packages/room-service
+    depends_on:
+      rooms-db:
+        condition: service_healthy
+    environment:
+      PORT: 3002
+      DB_HOST: rooms-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${ROOMS_DB_PASSWORD}
+      DB_NAME: conferx_rooms
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in config/.env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in config/.env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in config/.env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in config/.env}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+    # Not published: reach it through the gateway at http://localhost:9080/api/v1/rooms
+
+  # ---------------- Media (SFU) ----------------
+  livekit:
+    <<: *restart
+    image: livekit/livekit-server:v1.13.7
+    command: ["--config", "/etc/livekit.yaml", "--node-ip", "${LIVEKIT_NODE_IP:-127.0.0.1}"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"       # signaling (WebSocket)
+      - "7881:7881"       # WebRTC over TCP fallback
+      - "7882:7882/udp"   # WebRTC over UDP
+
+  # ---------------- Optional ----------------
+  auth-service:
+    profiles: ["auth"]
+    build:
+      context: ../packages/auth-service
+      target: development
+    ports:
+      - "127.0.0.1:3001:3001"
+    command: npm run start-dev
+
+  zookeeper:
+    profiles: ["kafka"]
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    profiles: ["kafka"]
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on:
+      - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    depends_on:
-      - zookeeper
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.0
-    ports:
-      - "2181:2181"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-  rooms-db:
-    image: postgres:14
-    restart: always
-    ports:
-      - "5432:5432"
-    environment:
-      # POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: wmJ9Q96@R3
-      POSTGRES_DB: conferx_rooms
+
+  apisix-dashboard:
+    profiles: ["dashboard"]
+    image: apache/apisix-dashboard:3.0.1-alpine
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-  auth-service:
-    build:
-      context: ../packages/auth-service
-      dockerfile: Dockerfile
-      target: development
+      - ./apisix/apisix_conf/dashboard_config.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
     ports:
-      - "3001:3001"
+      - "127.0.0.1:9000:9000"
     depends_on:
-      - kafka
-    environment:
-      KAFKA_BROKER: kafka:9092
-    command : npm run start-dev
-  room-service:
-    build:
-      context: ../packages/room-service
-      dockerfile: Dockerfile
+      etcd:
+        condition: service_healthy
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./apisix/prometheus_conf/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "3002:3002"
-    depends_on:
-      - rooms-db
-      - kafka
-    environment:
-      PORT: 3002
-      DB_URL: postgresql://postgres:wmJ9Q96@R3@rooms-db:5432/conferx_rooms
-      JWT_SECRET: a9afdaebc6cc54a123677d1ef113ed730070464bb817af97f3d36e10f6bab27d2a9105039fb317ad51d02c28372cc4b3d34c4f03f3d1378c270f0dffd34fff619e143751cfecbb072d822797412c1e61aefe146e185ae1b15acb2d140cfbb440fb413b52ce13f0ec447dd2fdeb61f390b86c68dd821adafcf330076ec12cdb2d82541bbbedddd0e5452a6091ab16b466c57f36bcaf02f915638fd6a2aafef3b982f2801a1015dc9e0ad821cd49a03e2947b7b47dbe64ce36074e67f26bef077eaf78728c5e2629c6c7eebd9278b53d2c29121cd9d07e1cdeda74407d818fee449891bb7a31667515e4ea66c5436b3f23f0ec36c46e2758f03dfa03b07d7413bc
-      KAFKA_BROKER: kafka:9092
-  # chat-service:
-    # build:
-    #   context: ../packages/chat-service
-    #   dockerfile: Dockerfile
-    # ports:
-    #   - "3003:3003"
-    # depends_on:
-    #   - kafka
-    # environment:
-    #   KAFKA_BROKER: kafka:9092
-networks:
-  apisix_network:
-    external: true
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.2.0
+    ports:
+      - "127.0.0.1:3030:3000"
+    volumes:
+      - ./apisix/grafana_conf/provisioning:/etc/grafana/provisioning
+      - ./apisix/grafana_conf/dashboards:/var/lib/grafana/dashboards
+      - ./apisix/grafana_conf/config/grafana.ini:/etc/grafana/grafana.ini
+
 volumes:
-  postgres_data:
   etcd_data:
-    driver: local
+  rooms_db_data:

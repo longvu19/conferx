@@ -4,13 +4,13 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "build": "nx affected:build",
-    "auth:build": "nx build auth-service",
-    "room:build": "nx build room-service",
-    "chat:build": "nx build chat-service",
+    "stack:up": "docker compose -f config/docker-compose.yml up -d --build",
+    "stack:down": "docker compose -f config/docker-compose.yml down",
+    "stack:logs": "docker compose -f config/docker-compose.yml logs -f",
+    "room:dev": "cd packages/room-service && bun run dev",
+    "room:typecheck": "cd packages/room-service && bun run typecheck",
     "auth:dev": "cd packages/auth-service && npm run dev",
-    "room:dev": "cd packages/room-service && npm run dev",
-    "chat:dev": "cd packages/chat-service && npm run dev"
+    "auth:build": "nx build auth-service"
   },
   "devDependencies": {
     "nx": "^16.0.0",
