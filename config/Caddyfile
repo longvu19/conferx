@@ -1,0 +1,7 @@
+conferx.duckdns.org {
+	reverse_proxy frontend:3000
+}
+
+conferx.duckdns.org:7880 {
+	reverse_proxy livekit:7880
+}

@@ -33,13 +33,13 @@ services:
     environment:
       APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY in config/.env}
     volumes:
-      - ./apisix/apisix_conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix_conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro,Z
     depends_on:
       etcd:
         condition: service_healthy
     ports:
-      - "9080:9080"             # public gateway
       - "127.0.0.1:9180:9180"   # admin API (localhost only)
+    # 9080 no longer published to the host: Caddy is the public entrypoint now.
 
   apisix-init:
     image: curlimages/curl:8.10.1
@@ -47,7 +47,7 @@ services:
     environment:
       APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY in config/.env}
     volumes:
-      - ./apisix/init/routes.sh:/routes.sh:ro
+      - ./apisix/init/routes.sh:/routes.sh:ro,Z
     entrypoint: ["sh", "/routes.sh"]
     depends_on:
       - apisix
@@ -127,6 +127,17 @@ services:
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
     # Not published: reach it through the gateway at http://localhost:9080/api/v1/rooms
 
+  # ---------------- Frontend ----------------
+  frontend:
+    <<: *restart
+    build:
+      context: ../../conferx-fe
+    depends_on:
+      - apisix
+    environment:
+      NUXT_API_BASE: http://apisix:9080
+    # 3000 no longer published to the host: Caddy is the public entrypoint now.
+
   # ---------------- Media (SFU) ----------------
   livekit:
     <<: *restart
@@ -135,11 +146,26 @@ services:
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
-      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro,Z
     ports:
-      - "7880:7880"       # signaling (WebSocket)
       - "7881:7881"       # WebRTC over TCP fallback
       - "7882:7882/udp"   # WebRTC over UDP
+    # 7880 (signaling) no longer published directly: Caddy terminates TLS there instead.
+
+  caddy:
+    <<: *restart
+    image: caddy:2
+    depends_on:
+      - frontend
+      - livekit
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+      - "7880:7880"
 
   # ---------------- Optional ----------------
   zookeeper:
@@ -193,3 +219,5 @@ volumes:
   etcd_data:
   rooms_db_data:
   auth_db_data:
+  caddy_data:
+  caddy_config:
