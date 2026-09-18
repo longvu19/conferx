@@ -18,6 +18,7 @@ export const createMediaToken = async (roomId: string, userId: string, name: str
     canPublish: true,
     canSubscribe: true,
     canPublishData: true,
+    canUpdateOwnMetadata: true,
   });
   return token.toJwt();
 };
